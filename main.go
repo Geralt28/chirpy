@@ -47,11 +47,11 @@ func main() {
 	port := "8080"
 
 	//mux.Handle("/app/", http.StripPrefix("/app", http.FileServer(http.Dir(filePath+"/app"))))
-	mux.HandleFunc("/healthz", readinessHandler)
 	cfg := &apiConfig{}
-	mux.Handle("/metrics/", cfg.numberServerHits(http.StripPrefix("/metrics", http.FileServer(http.Dir(filePath+"/metrics")))))
-	mux.Handle("/reset/", cfg.resetServerHits(http.StripPrefix("/reset", http.FileServer(http.Dir(filePath+"/reset")))))
-	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filePath+"/app")))))
+	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filePath+"/app")))))
+	mux.HandleFunc("GET /healthz", readinessHandler)
+	mux.Handle("GET /metrics", cfg.numberServerHits(http.StripPrefix("/metrics", http.FileServer(http.Dir(filePath+"/metrics")))))
+	mux.Handle("POST /reset", cfg.resetServerHits(http.StripPrefix("/reset", http.FileServer(http.Dir(filePath+"/reset")))))
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
