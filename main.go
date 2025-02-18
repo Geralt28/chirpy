@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -50,6 +51,9 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 	type successResponse struct {
 		Valid bool `json:"valid"`
 	}
+	type successCleaned struct {
+		Cleaned_body string `json:"cleaned_body"`
+	}
 
 	w.Header().Add("Content-Type", "application/json") //naglowek taki sam dla wszystkich odpowiedzi
 
@@ -77,8 +81,20 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.WriteHeader(http.StatusOK) //status 200
-	json.NewEncoder(w).Encode(successResponse{Valid: true})
-	return
+	// to trzeba odblokowac do zadania 4.2, a pozniej nizej uzyc tego kolejnego
+	//json.NewEncoder(w).Encode(successResponse{Valid: true})
+	slowa := strings.Split(req.Body, " ")
+	brzydkie_slowa := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	for i, slowo := range slowa {
+		if _, exists := brzydkie_slowa[strings.ToLower(slowo)]; exists {
+			slowa[i] = "****"
+		}
+	}
+	json.NewEncoder(w).Encode(successCleaned{Cleaned_body: strings.Join(slowa, " ")})
 }
 
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
