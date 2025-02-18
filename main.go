@@ -44,9 +44,9 @@ func main() {
 	//mux.Handle("/app/", http.StripPrefix("/app", http.FileServer(http.Dir(filePath+"/app"))))
 	cfg := &apiConfig{}
 	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filePath+"/app")))))
-	mux.HandleFunc("GET /healthz", readinessHandler)
-	mux.HandleFunc("GET /metrics", cfg.handlerMetrics)
-	mux.HandleFunc("POST /reset", cfg.handlerReset)
+	mux.HandleFunc("GET /api/healthz", readinessHandler)
+	mux.HandleFunc("GET /api/metrics", cfg.handlerMetrics)
+	mux.HandleFunc("POST /api/reset", cfg.handlerReset)
 	//mux.Handle("GET /metrics", cfg.numberServerHits(http.StripPrefix("/metrics", http.FileServer(http.Dir(filePath+"/metrics")))))
 	//mux.Handle("POST /reset", cfg.resetServerHits(http.StripPrefix("/reset", http.FileServer(http.Dir(filePath+"/reset")))))
 	//mux.Handle("/", cfg.middlewareMetricsInc(http.StripPrefix("/", http.FileServer(http.Dir(filePath+"/app")))))
