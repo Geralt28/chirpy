@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -55,13 +56,13 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Hits reset to 0"))
-
+	cfg.db.DeleteUsers(context.Background())
 }
 
-func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-
+func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 	type request struct {
-		Body string `json:"body"`
+		Body    string    `json:"body"`
+		User_id uuid.UUID `json:"user_id"`
 	}
 	type errorResponse struct {
 		Error string `json:"error"`
@@ -72,33 +73,26 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 	type successCleaned struct {
 		Cleaned_body string `json:"cleaned_body"`
 	}
-
 	w.Header().Add("Content-Type", "application/json") //naglowek taki sam dla wszystkich odpowiedzi
-
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) //status 400, checked on net - not sure which is "right" code
-		//odpowiedz, _ := json.Marshal((map[string]string{"error": "Something went wrong"}))
-		//w.Write(odpowiedz)
 		json.NewEncoder(w).Encode(errorResponse{Error: "Something went wrong"})
 		return
 	}
-
 	defer r.Body.Close()
 	var req request
-
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(errorResponse{Error: "Something went wrong"})
 		return
 	}
-
 	if len(req.Body) > 140 {
 		w.WriteHeader(http.StatusBadRequest) //status 400, checked on net
 		json.NewEncoder(w).Encode(errorResponse{Error: "Chirp is too long"})
 		return
 	}
-	w.WriteHeader(http.StatusOK) //status 200
+	//w.WriteHeader(http.StatusOK) //status 200
 	// ***** to trzeba odblokowac do zadania 4.2, a pozniej nizej uzyc tego kolejnego *****
 	//json.NewEncoder(w).Encode(successResponse{Valid: true})
 	slowa := strings.Split(req.Body, " ")
@@ -112,7 +106,32 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 			slowa[i] = "****"
 		}
 	}
-	json.NewEncoder(w).Encode(successCleaned{Cleaned_body: strings.Join(slowa, " ")})
+	chirp_text := strings.Join(slowa, " ")
+
+	//_, err = cfg.db.GetUserByID(context.Background(), userID)
+	//if err != nil {
+	//w.WriteHeader(http.StatusBadRequest)
+	//json.NewEncoder(w).Encode(errorResponse{Error: "User does not exist"})
+	//return
+	//}
+
+	chirpParams := database.WriteChirpParams{
+		Body:   chirp_text,
+		UserID: req.User_id,
+	}
+
+	//chirp_baza, err := cfg.db.WriteChirp(context.Background(), chirpParams)
+	chirp_baza, err := cfg.db.WriteChirp(context.Background(), chirpParams)
+	if err != nil {
+		debugMsg := fmt.Sprintf("Database error: %v", err) // Convert error to string
+		fmt.Println(debugMsg)                              // Also print to console (optional)
+		w.WriteHeader(http.StatusInternalServerError)
+		//json.NewEncoder(w).Encode(errorResponse{Error: "Could not save chirp"})
+		json.NewEncoder(w).Encode(errorResponse{Error: debugMsg})
+		return
+	}
+	w.WriteHeader(http.StatusCreated) // Status 201 for successful resource creation
+	json.NewEncoder(w).Encode(chirp_baza)
 }
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -120,13 +139,22 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		Email string `json:"email"`
 	}
 	req := request{}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	user_data, err := cfg.db.CreateUser(context.Background(), req.Email)
+	if err != nil {
+		fmt.Println("error: user not created into database")
+		http.Error(w, "Could not create user", http.StatusInternalServerError)
+		return
+	}
 
 	user := User{
-		ID:        uuid.New(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Email:     req.Email,
+		ID:        user_data.ID,
+		CreatedAt: user_data.CreatedAt,
+		UpdatedAt: user_data.UpdatedAt,
+		Email:     user_data.Email,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -135,7 +163,6 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	cfg.db.CreateUser(r.Context(), req.Email)
 }
 
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
@@ -180,8 +207,9 @@ func main() {
 	// revers to upper lines to pass -3.1, below it is for lesson 3.4 (both will not work)
 	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
+	//mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
 	mux.HandleFunc("POST /api/users", cfg.handlerCreateUser)
+	mux.HandleFunc("POST /api/chirps", cfg.handlerChirps)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
