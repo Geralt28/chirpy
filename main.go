@@ -9,15 +9,25 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Geralt28/chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	query          *database.Queries
+	db             *database.Queries
+	platform       string
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -45,6 +55,7 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Hits reset to 0"))
+
 }
 
 func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +115,29 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(successCleaned{Cleaned_body: strings.Join(slowa, " ")})
 }
 
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		Email string `json:"email"`
+	}
+	req := request{}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	user := User{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Email:     req.Email,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	cfg.db.CreateUser(r.Context(), req.Email)
+}
+
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8") //ustawianie headera odpowiedzi
 	w.WriteHeader(http.StatusOK)                                // ustawianie status code
@@ -116,17 +150,29 @@ func main() {
 	godotenv.Load()
 	// odczytaj link do bazy
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	// otworz polaczenie z baza
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Println("error: can not open database")
+		return
+	}
 	dbQueries := database.New(db)
-	fmt.Println(dbQueries)
+
+	//user, err := cfg.db.CreateUser(r.Context(), params.Email)
 
 	mux := http.NewServeMux()
 	filePath := "/home/geralt/workspace/github.com/Geralt28/chirpy"
 	port := "8080"
 
 	//mux.Handle("/app/", http.StripPrefix("/app", http.FileServer(http.Dir(filePath+"/app"))))
-	cfg := &apiConfig{}
+
+	// Initialize apiConfig with PLATFORM and database queries
+	cfg := &apiConfig{
+		db:       dbQueries,
+		platform: platform,
+	}
+
 	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filePath+"/app")))))
 	mux.HandleFunc("GET /api/healthz", readinessHandler)
 	//mux.HandleFunc("GET /api/metrics", cfg.handlerMetrics)
@@ -135,6 +181,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 	mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
+	mux.HandleFunc("POST /api/users", cfg.handlerCreateUser)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
