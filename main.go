@@ -1,16 +1,23 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/Geralt28/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	query          *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -81,7 +88,7 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.WriteHeader(http.StatusOK) //status 200
-	// to trzeba odblokowac do zadania 4.2, a pozniej nizej uzyc tego kolejnego
+	// ***** to trzeba odblokowac do zadania 4.2, a pozniej nizej uzyc tego kolejnego *****
 	//json.NewEncoder(w).Encode(successResponse{Valid: true})
 	slowa := strings.Split(req.Body, " ")
 	brzydkie_slowa := map[string]struct{}{
@@ -105,6 +112,15 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	//zaladuj .env
+	godotenv.Load()
+	// odczytaj link do bazy
+	dbURL := os.Getenv("DB_URL")
+	// otworz polaczenie z baza
+	db, err := sql.Open("postgres", dbURL)
+	dbQueries := database.New(db)
+	fmt.Println(dbQueries)
+
 	mux := http.NewServeMux()
 	filePath := "/home/geralt/workspace/github.com/Geralt28/chirpy"
 	port := "8080"
@@ -128,7 +144,7 @@ func main() {
 	// Start the server
 	fmt.Println("Starting server on http://localhost:8080")
 	fmt.Printf("Serving files from %s on port: %s\n", filePath, port)
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		fmt.Println("Error starting server:", err)
 	}
