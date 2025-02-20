@@ -59,7 +59,7 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.db.DeleteUsers(context.Background())
 }
 
-func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) {
 	type request struct {
 		Body    string    `json:"body"`
 		User_id uuid.UUID `json:"user_id"`
@@ -132,6 +132,16 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusCreated) // Status 201 for successful resource creation
 	json.NewEncoder(w).Encode(chirp_baza)
+}
+
+func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetChirps(context.Background())
+	if err != nil {
+		fmt.Println("error: could not get chirps")
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(chirps)
 }
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +219,8 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 	//mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
 	mux.HandleFunc("POST /api/users", cfg.handlerCreateUser)
-	mux.HandleFunc("POST /api/chirps", cfg.handlerChirps)
+	mux.HandleFunc("POST /api/chirps", cfg.handlerPostChirps)
+	mux.HandleFunc("GET /api/chirps", cfg.handlerGetChirps)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
