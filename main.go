@@ -67,12 +67,12 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 	type errorResponse struct {
 		Error string `json:"error"`
 	}
-	type successResponse struct {
-		Valid bool `json:"valid"`
-	}
-	type successCleaned struct {
-		Cleaned_body string `json:"cleaned_body"`
-	}
+	//type successResponse struct {
+	//	Valid bool `json:"valid"`
+	//}
+	//type successCleaned struct {
+	//	Cleaned_body string `json:"cleaned_body"`
+	//}
 	w.Header().Add("Content-Type", "application/json") //naglowek taki sam dla wszystkich odpowiedzi
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -120,18 +120,31 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		UserID: req.User_id,
 	}
 
-	//chirp_baza, err := cfg.db.WriteChirp(context.Background(), chirpParams)
+	type chirpResponse struct {
+		ID        uuid.UUID `json:"id"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+
 	chirp_baza, err := cfg.db.WriteChirp(context.Background(), chirpParams)
 	if err != nil {
 		debugMsg := fmt.Sprintf("Database error: %v", err) // Convert error to string
-		fmt.Println(debugMsg)                              // Also print to console (optional)
+		fmt.Println(debugMsg)
 		w.WriteHeader(http.StatusInternalServerError)
-		//json.NewEncoder(w).Encode(errorResponse{Error: "Could not save chirp"})
 		json.NewEncoder(w).Encode(errorResponse{Error: debugMsg})
 		return
 	}
+
+	response := chirpResponse{
+		ID:        chirp_baza.ID,
+		Body:      chirp_baza.Body,
+		UserID:    chirp_baza.UserID,
+		CreatedAt: chirp_baza.CreatedAt,
+	}
+
 	w.WriteHeader(http.StatusCreated) // Status 201 for successful resource creation
-	json.NewEncoder(w).Encode(chirp_baza)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +155,37 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(chirps)
+}
+
+func (cfg *apiConfig) handlerGet1Chirp(w http.ResponseWriter, r *http.Request) {
+	//fmt.Println("Full URL Path:", r.URL.Path) // Debugging: full request path?
+	chirpID := r.PathValue("chirpID")
+	//fmt.Println("Extracted chirpID:", chirpID) // Debugging
+
+	if chirpID == "" {
+		http.Error(w, "Invalid chirp ID", http.StatusBadRequest)
+		return
+	}
+	fmt.Println(chirpID)
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		http.Error(w, "Invalid chirp ID format", http.StatusBadRequest)
+		return
+	}
+	chirp, err := cfg.db.Get1Chirp(r.Context(), chirpUUID)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]interface{}{
+		"id":         chirp.ID,
+		"body":       chirp.Body,
+		"user_id":    chirp.UserID,
+		"created_at": chirp.CreatedAt,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +265,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", cfg.handlerCreateUser)
 	mux.HandleFunc("POST /api/chirps", cfg.handlerPostChirps)
 	mux.HandleFunc("GET /api/chirps", cfg.handlerGetChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.handlerGet1Chirp)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
