@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Geralt28/chirpy/internal/auth"
 	"github.com/Geralt28/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -126,7 +127,6 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		UserID    uuid.UUID `json:"user_id"`
 		CreatedAt time.Time `json:"created_at"`
 	}
-
 	chirp_baza, err := cfg.db.WriteChirp(context.Background(), chirpParams)
 	if err != nil {
 		debugMsg := fmt.Sprintf("Database error: %v", err) // Convert error to string
@@ -135,14 +135,12 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		json.NewEncoder(w).Encode(errorResponse{Error: debugMsg})
 		return
 	}
-
 	response := chirpResponse{
 		ID:        chirp_baza.ID,
 		Body:      chirp_baza.Body,
 		UserID:    chirp_baza.UserID,
 		CreatedAt: chirp_baza.CreatedAt,
 	}
-
 	w.WriteHeader(http.StatusCreated) // Status 201 for successful resource creation
 	json.NewEncoder(w).Encode(response)
 }
@@ -161,7 +159,6 @@ func (cfg *apiConfig) handlerGet1Chirp(w http.ResponseWriter, r *http.Request) {
 	//fmt.Println("Full URL Path:", r.URL.Path) // Debugging: full request path?
 	chirpID := r.PathValue("chirpID")
 	//fmt.Println("Extracted chirpID:", chirpID) // Debugging
-
 	if chirpID == "" {
 		http.Error(w, "Invalid chirp ID", http.StatusBadRequest)
 		return
@@ -190,30 +187,84 @@ func (cfg *apiConfig) handlerGet1Chirp(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	type request struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	req := request{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
-	user_data, err := cfg.db.CreateUser(context.Background(), req.Email)
+	hashed_pass, err := auth.HashPassword(req.Password)
+	if err != nil {
+		fmt.Println("error: could not hash password")
+		return
+	}
+	userParams := database.CreateUserParams{
+		Email:          req.Email,
+		HashedPassword: hashed_pass,
+	}
+	user_data, err := cfg.db.CreateUser(context.Background(), userParams)
 	if err != nil {
 		fmt.Println("error: user not created into database")
 		http.Error(w, "Could not create user", http.StatusInternalServerError)
 		return
 	}
-
 	user := User{
 		ID:        user_data.ID,
 		CreatedAt: user_data.CreatedAt,
 		UpdatedAt: user_data.UpdatedAt,
 		Email:     user_data.Email,
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(user); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	var req request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Println("error: could not decode json")
+		return
+	}
+	user, err := cfg.db.GetUser(context.Background(), req.Email)
+	if err != nil {
+		fmt.Println("error: user could not be find. email:", req.Email)
+		return
+	}
+	err = auth.CheckPasswordHash(req.Password, user.HashedPassword)
+	if err != nil {
+		fmt.Println("error: wrong password")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("Incorrect email or password"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	type userResponse struct {
+		ID         uuid.UUID `json:"id"`
+		Created_at time.Time `json:"created_at"`
+		Updated_at time.Time `json:"updated_at"`
+		Email      string    `json:"email"`
+	}
+
+	response := userResponse{
+		ID:         user.ID,
+		Created_at: user.CreatedAt,
+		Updated_at: user.UpdatedAt,
+		Email:      user.Email,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -266,6 +317,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", cfg.handlerPostChirps)
 	mux.HandleFunc("GET /api/chirps", cfg.handlerGetChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.handlerGet1Chirp)
+	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080

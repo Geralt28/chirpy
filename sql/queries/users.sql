@@ -1,10 +1,11 @@
 -- name: CreateUser :one
-INSERT INTO users (id, created_at, updated_at, email)
+INSERT INTO users (id, created_at, updated_at, email, hashed_password)
 VALUES (
     gen_random_uuid(),
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP,
-    $1
+    $1,
+    $2
 )
 RETURNING *;
 
@@ -30,3 +31,7 @@ ORDER BY created_at;
 SELECT * FROM chirps
 WHERE id = $1
 ORDER BY created_at;
+
+-- name: GetUser :one
+SELECT * FROM users
+WHERE email = $1;
