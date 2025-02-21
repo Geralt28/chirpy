@@ -256,14 +256,12 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Updated_at time.Time `json:"updated_at"`
 		Email      string    `json:"email"`
 	}
-
 	response := userResponse{
 		ID:         user.ID,
 		Created_at: user.CreatedAt,
 		Updated_at: user.UpdatedAt,
 		Email:      user.Email,
 	}
-
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
