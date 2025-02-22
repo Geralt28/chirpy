@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -61,7 +63,6 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		}
 		return userID, nil
 	}
-
 	return uuid.Nil, fmt.Errorf("invalid token")
 }
 
@@ -75,4 +76,22 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", fmt.Errorf("token is empty")
 	}
 	return token, nil
+}
+
+func GetRefreshToken(headers http.Header) (string, error) {
+	refreshHeader := headers.Get("Authorization")
+	if refreshHeader == "" {
+		return "", fmt.Errorf("authorization refresh header not found")
+	}
+	refrToken := strings.ReplaceAll(refreshHeader, "Bearer ", "")
+	if refrToken == "" {
+		return "", fmt.Errorf("refresh token is empty")
+	}
+	return refrToken, nil
+}
+
+func MakeRefreshToken() (string, error) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	return hex.EncodeToString(key), nil
 }

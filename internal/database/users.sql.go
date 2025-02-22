@@ -121,6 +121,77 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 	return i, err
 }
 
+const readRefreshToken = `-- name: ReadRefreshToken :one
+SELECT token, created_at, updated_at, user_id, expired_at, revoked_at FROM refresh_tokens
+WHERE token = $1
+`
+
+func (q *Queries) ReadRefreshToken(ctx context.Context, token string) (RefreshToken, error) {
+	row := q.db.QueryRowContext(ctx, readRefreshToken, token)
+	var i RefreshToken
+	err := row.Scan(
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ExpiredAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const revokeRefreshToken = `-- name: RevokeRefreshToken :one
+UPDATE refresh_tokens
+SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+WHERE token = $1
+RETURNING token, created_at, updated_at, user_id, expired_at, revoked_at
+`
+
+func (q *Queries) RevokeRefreshToken(ctx context.Context, token string) (RefreshToken, error) {
+	row := q.db.QueryRowContext(ctx, revokeRefreshToken, token)
+	var i RefreshToken
+	err := row.Scan(
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ExpiredAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const storeRefreshToken = `-- name: StoreRefreshToken :one
+INSERT INTO refresh_tokens (token, created_at, updated_at, user_id, expired_at)
+VALUES (
+    $1,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP,
+    $2,
+    CURRENT_TIMESTAMP + INTERVAL '60 days'
+)
+RETURNING token, created_at, updated_at, user_id, expired_at, revoked_at
+`
+
+type StoreRefreshTokenParams struct {
+	Token  string
+	UserID uuid.UUID
+}
+
+func (q *Queries) StoreRefreshToken(ctx context.Context, arg StoreRefreshTokenParams) (RefreshToken, error) {
+	row := q.db.QueryRowContext(ctx, storeRefreshToken, arg.Token, arg.UserID)
+	var i RefreshToken
+	err := row.Scan(
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ExpiredAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const writeChirp = `-- name: WriteChirp :one
 INSERT INTO chirps (id, created_at, updated_at, body, user_id)
 VALUES (

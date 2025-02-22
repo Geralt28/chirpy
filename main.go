@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -275,14 +276,14 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 
 	type userResponse struct {
-		ID         uuid.UUID `json:"id"`
-		Created_at time.Time `json:"created_at"`
-		Updated_at time.Time `json:"updated_at"`
-		Email      string    `json:"email"`
-		Token      string    `json:"token"`
+		ID            uuid.UUID `json:"id"`
+		Created_at    time.Time `json:"created_at"`
+		Updated_at    time.Time `json:"updated_at"`
+		Email         string    `json:"email"`
+		Token         string    `json:"token"`
+		Refresh_Token string    `json:"refresh_token"`
 	}
 	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(req.ExpiresInSec)*time.Second)
 	if err != nil {
@@ -291,17 +292,80 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Could not generate token"))
 		return
 	}
-	odpowiedz := userResponse{
-		ID:         user.ID,
-		Created_at: user.CreatedAt,
-		Updated_at: user.UpdatedAt,
-		Email:      user.Email,
-		Token:      token,
+	refresh_token, err := auth.MakeRefreshToken()
+	if err != nil {
+		fmt.Println("error: could not generate refresh_token")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+	RefreshTokenParams := database.StoreRefreshTokenParams{
+		Token:  refresh_token,
+		UserID: user.ID,
+	}
+	savedRefreshToken, err := cfg.db.StoreRefreshToken(context.Background(), RefreshTokenParams)
+	if err != nil {
+		log.Println("error: could not save RefreshToken into database")
+		return
+	}
+	odpowiedz := userResponse{
+		ID:            user.ID,
+		Created_at:    user.CreatedAt,
+		Updated_at:    user.UpdatedAt,
+		Email:         user.Email,
+		Token:         token,
+		Refresh_Token: savedRefreshToken.Token,
+	}
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(odpowiedz); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	refresh_token, err := auth.GetRefreshToken(r.Header)
+	if err != nil {
+		log.Println("error: could not retrieve refresh_token")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	ref_token, err := cfg.db.ReadRefreshToken(context.Background(), refresh_token)
+	if err != nil || ref_token.RevokedAt.Valid {
+		log.Println("error: bad refresh token")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	// tutaj trzeba jeszcze uzyskac uzytkownika i nowy token, ktory zostanie wyslany - uwaga dodac jeszcze sprawdzenie czy nie expired token (wyzej) bo nie zrobilem tego
+	type odp struct {
+		Token string `json:"token"`
+	}
+	newToken, err := auth.MakeJWT(ref_token.UserID, cfg.secret, time.Minute)
+	if err != nil {
+		log.Println("error: could not generate new token")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	odpowiedz := odp{
+		Token: newToken,
+	}
+	json.NewEncoder(w).Encode(odpowiedz)
+}
+
+func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
+	refresh_token, err := auth.GetRefreshToken(r.Header)
+	if err != nil {
+		log.Println("error: could not retrieve refresh_token")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	_, err = cfg.db.RevokeRefreshToken(context.Background(), refresh_token)
+	if err != nil {
+		log.Println("error: could not revoke token, maybe does not exist")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
@@ -354,6 +418,8 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", cfg.handlerGetChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.handlerGet1Chirp)
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
+	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
+	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
