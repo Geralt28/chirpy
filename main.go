@@ -23,6 +23,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
+	secret         string
 }
 
 type User struct {
@@ -60,6 +61,12 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.db.DeleteUsers(context.Background())
 }
 
+func BadToken(w http.ResponseWriter) {
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	w.Write([]byte("Unauthorised user"))
+}
+
 func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) {
 	type request struct {
 		Body    string    `json:"body"`
@@ -74,6 +81,7 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 	//type successCleaned struct {
 	//	Cleaned_body string `json:"cleaned_body"`
 	//}
+
 	w.Header().Add("Content-Type", "application/json") //naglowek taki sam dla wszystkich odpowiedzi
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -88,6 +96,20 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		json.NewEncoder(w).Encode(errorResponse{Error: "Something went wrong"})
 		return
 	}
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		fmt.Println("error: could not get token from header")
+		BadToken(w)
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		fmt.Println("error: validate failed")
+		BadToken(w)
+		return
+	}
+	fmt.Println("validated user ID which requested posting:", userID)
+
 	if len(req.Body) > 140 {
 		w.WriteHeader(http.StatusBadRequest) //status 400, checked on net
 		json.NewEncoder(w).Encode(errorResponse{Error: "Chirp is too long"})
@@ -118,7 +140,7 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 
 	chirpParams := database.WriteChirpParams{
 		Body:   chirp_text,
-		UserID: req.User_id,
+		UserID: userID,
 	}
 
 	type chirpResponse struct {
@@ -226,14 +248,19 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type request struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password     string `json:"password"`
+		Email        string `json:"email"`
+		ExpiresInSec int    `json:"expires_in_seconds,omitempty"`
 	}
 	var req request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fmt.Println("error: could not decode json")
 		return
 	}
+	if req.ExpiresInSec == 0 {
+		req.ExpiresInSec = 60
+	}
+
 	user, err := cfg.db.GetUser(context.Background(), req.Email)
 	if err != nil {
 		fmt.Println("error: user could not be find. email:", req.Email)
@@ -255,14 +282,23 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Created_at time.Time `json:"created_at"`
 		Updated_at time.Time `json:"updated_at"`
 		Email      string    `json:"email"`
+		Token      string    `json:"token"`
 	}
-	response := userResponse{
+	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(req.ExpiresInSec)*time.Second)
+	if err != nil {
+		fmt.Println("error: could not generate token")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Could not generate token"))
+		return
+	}
+	odpowiedz := userResponse{
 		ID:         user.ID,
 		Created_at: user.CreatedAt,
 		Updated_at: user.UpdatedAt,
 		Email:      user.Email,
+		Token:      token,
 	}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(odpowiedz); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -281,6 +317,7 @@ func main() {
 	// odczytaj link do bazy
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	secret := os.Getenv("SECRET")
 	// otworz polaczenie z baza
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -301,6 +338,7 @@ func main() {
 	cfg := &apiConfig{
 		db:       dbQueries,
 		platform: platform,
+		secret:   secret,
 	}
 
 	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filePath+"/app")))))
