@@ -28,10 +28,11 @@ type apiConfig struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID            uuid.UUID `json:"id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Email         string    `json:"email"`
+	Is_chirpy_red bool      `json:"Is_chirpy_red"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -233,10 +234,11 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	user := User{
-		ID:        user_data.ID,
-		CreatedAt: user_data.CreatedAt,
-		UpdatedAt: user_data.UpdatedAt,
-		Email:     user_data.Email,
+		ID:            user_data.ID,
+		CreatedAt:     user_data.CreatedAt,
+		UpdatedAt:     user_data.UpdatedAt,
+		Email:         user_data.Email,
+		Is_chirpy_red: user_data.IsChirpyRed,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -281,6 +283,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Created_at    time.Time `json:"created_at"`
 		Updated_at    time.Time `json:"updated_at"`
 		Email         string    `json:"email"`
+		Is_chirpy_red bool      `json:"Is_chirpy_red"`
 		Token         string    `json:"token"`
 		Refresh_Token string    `json:"refresh_token"`
 	}
@@ -311,6 +314,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Created_at:    user.CreatedAt,
 		Updated_at:    user.UpdatedAt,
 		Email:         user.Email,
+		Is_chirpy_red: user.IsChirpyRed,
 		Token:         token,
 		Refresh_Token: savedRefreshToken.Token,
 	}
@@ -405,17 +409,12 @@ func (cfg *apiConfig) handlerChangeUser(w http.ResponseWriter, r *http.Request) 
 		log.Println("error: could not update user")
 		return
 	}
-	type odp struct {
-		Id         uuid.UUID `json:"id"`
-		Email      string    `json:"email"`
-		Updated_at time.Time `json:"updated_at"`
-		Created_at time.Time `json:"created_at"`
-	}
-	odpowiedz := odp{
-		Id:         updUser.ID,
-		Email:      updUser.Email,
-		Updated_at: updUser.UpdatedAt,
-		Created_at: updUser.CreatedAt,
+	odpowiedz := User{
+		ID:            updUser.ID,
+		Email:         updUser.Email,
+		UpdatedAt:     updUser.UpdatedAt,
+		CreatedAt:     updUser.CreatedAt,
+		Is_chirpy_red: updUser.IsChirpyRed,
 	}
 	json.NewEncoder(w).Encode(odpowiedz)
 }
@@ -455,6 +454,37 @@ func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) handlerWebHooks(w http.ResponseWriter, r *http.Request) {
+	type User_ID_struct struct {
+		User_id uuid.UUID `json:"user_id"`
+	}
+	type WebHooks struct {
+		Event string         `json:"event"`
+		Data  User_ID_struct `json:"data"`
+	}
+	var webhooks WebHooks
+	if err := json.NewDecoder(r.Body).Decode(&webhooks); err != nil {
+		w.WriteHeader(http.StatusBadRequest) // nie jestem pewien ktory request ale lepiej czyms odpowiadac
+		log.Println("error: could not decode request")
+		return
+	}
+	defer r.Body.Close()
+	if webhooks.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		log.Println("error: missing event 'user.upgraded'")
+		return
+	}
+	upgraded_user, err := cfg.db.UpgradeUser(context.Background(), webhooks.Data.User_id)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		log.Println("error: could not upgrade user; user not found")
+		return
+	}
+	log.Println(upgraded_user)
+	w.WriteHeader(http.StatusNoContent)
+	w.Write([]byte{})
 }
 
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +541,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
 	mux.HandleFunc("PUT /api/users", cfg.handlerChangeUser)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.handlerDeleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", cfg.handlerWebHooks)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080
