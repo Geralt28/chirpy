@@ -170,9 +170,23 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetChirps(context.Background())
-	if err != nil {
-		fmt.Println("error: could not get chirps")
+	author := r.URL.Query().Get("author_id")
+	var chirps []database.Chirp
+	var err error
+	if len(author) > 0 {
+		author_id, err := uuid.Parse(author)
+		if err != nil {
+			log.Println("error: could not parse author ID to UUID")
+		}
+		chirps, err = cfg.db.GetAuthorChirps(context.Background(), author_id)
+		if err != nil {
+			log.Println("error: could get author Chirps")
+		}
+	} else {
+		chirps, err = cfg.db.GetChirps(context.Background())
+		if err != nil {
+			fmt.Println("error: could not get chirps")
+		}
 	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
