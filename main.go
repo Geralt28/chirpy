@@ -105,7 +105,6 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 	}
 	userID, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
-		fmt.Println("error: validate failed")
 		BadToken(w)
 		return
 	}
@@ -368,6 +367,59 @@ func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) handlerChangeUser(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	var req request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		log.Println("error: could not decode request body (ChangeUser)")
+		return
+	}
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		log.Println("error: could not get token from header (ChangeUser)")
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	hashed_pass, err := auth.HashPassword(req.Password)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Println("error: could not hash password")
+		return
+	}
+	userParams := database.UpdateUserParams{
+		Email:          req.Email,
+		HashedPassword: hashed_pass,
+		ID:             userID,
+	}
+	updUser, err := cfg.db.UpdateUser(context.Background(), userParams)
+	if err != nil {
+		log.Println("error: could not update user")
+		return
+	}
+	type odp struct {
+		Id         uuid.UUID `json:"id"`
+		Email      string    `json:"email"`
+		Updated_at time.Time `json:"updated_at"`
+		Created_at time.Time `json:"created_at"`
+	}
+	odpowiedz := odp{
+		Id:         updUser.ID,
+		Email:      updUser.Email,
+		Updated_at: updUser.UpdatedAt,
+		Created_at: updUser.CreatedAt,
+	}
+	json.NewEncoder(w).Encode(odpowiedz)
+}
+
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8") //ustawianie headera odpowiedzi
 	w.WriteHeader(http.StatusOK)                                // ustawianie status code
@@ -420,6 +472,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
+	mux.HandleFunc("PUT /api/users", cfg.handlerChangeUser)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080

@@ -63,6 +63,7 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		}
 		return userID, nil
 	}
+	fmt.Println("error: validate failed")
 	return uuid.Nil, fmt.Errorf("invalid token")
 }
 

@@ -57,4 +57,12 @@ SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 WHERE token = $1
 RETURNING *;
 
+-- name: UpdateUser :one
+UPDATE users
+SET email = $1,
+    updated_at = CURRENT_TIMESTAMP,
+    hashed_password = $2
+WHERE id = $3
+RETURNING *;
+
 

@@ -192,6 +192,34 @@ func (q *Queries) StoreRefreshToken(ctx context.Context, arg StoreRefreshTokenPa
 	return i, err
 }
 
+const updateUser = `-- name: UpdateUser :one
+UPDATE users
+SET email = $1,
+    updated_at = CURRENT_TIMESTAMP,
+    hashed_password = $2
+WHERE id = $3
+RETURNING id, created_at, updated_at, email, hashed_password
+`
+
+type UpdateUserParams struct {
+	Email          string
+	HashedPassword string
+	ID             uuid.UUID
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUser, arg.Email, arg.HashedPassword, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.HashedPassword,
+	)
+	return i, err
+}
+
 const writeChirp = `-- name: WriteChirp :one
 INSERT INTO chirps (id, created_at, updated_at, body, user_id)
 VALUES (
