@@ -25,6 +25,7 @@ type apiConfig struct {
 	db             *database.Queries
 	platform       string
 	secret         string
+	polka_key      string
 }
 
 type User struct {
@@ -32,7 +33,7 @@ type User struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Email         string    `json:"email"`
-	Is_chirpy_red bool      `json:"Is_chirpy_red"`
+	Is_chirpy_red bool      `json:"is_chirpy_red"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -283,7 +284,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Created_at    time.Time `json:"created_at"`
 		Updated_at    time.Time `json:"updated_at"`
 		Email         string    `json:"email"`
-		Is_chirpy_red bool      `json:"Is_chirpy_red"`
+		Is_chirpy_red bool      `json:"is_chirpy_red"`
 		Token         string    `json:"token"`
 		Refresh_Token string    `json:"refresh_token"`
 	}
@@ -457,6 +458,17 @@ func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) handlerWebHooks(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		log.Println("error: could not get API Key")
+		return
+	}
+	if apiKey != cfg.polka_key {
+		w.WriteHeader(http.StatusUnauthorized)
+		log.Println("error: not authorised")
+		return
+	}
 	type User_ID_struct struct {
 		User_id uuid.UUID `json:"user_id"`
 	}
@@ -501,6 +513,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 	secret := os.Getenv("SECRET")
+	polka_key := os.Getenv("POLKA_KEY")
 	// otworz polaczenie z baza
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -519,9 +532,10 @@ func main() {
 
 	// Initialize apiConfig with PLATFORM and database queries
 	cfg := &apiConfig{
-		db:       dbQueries,
-		platform: platform,
-		secret:   secret,
+		db:        dbQueries,
+		platform:  platform,
+		secret:    secret,
+		polka_key: polka_key,
 	}
 
 	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filePath+"/app")))))

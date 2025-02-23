@@ -96,3 +96,15 @@ func MakeRefreshToken() (string, error) {
 	rand.Read(key)
 	return hex.EncodeToString(key), nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	polkaHeader := headers.Get("Authorization")
+	if polkaHeader == "" {
+		return "", fmt.Errorf("authorization header not found")
+	}
+	apiKey := strings.ReplaceAll(polkaHeader, "ApiKey ", "")
+	if apiKey == "" {
+		return "", fmt.Errorf("token is empty")
+	}
+	return apiKey, nil
+}
