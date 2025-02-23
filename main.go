@@ -420,6 +420,43 @@ func (cfg *apiConfig) handlerChangeUser(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(odpowiedz)
 }
 
+func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		log.Println("error: could not get token from header (DeleteChirp)")
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	chirpID := r.PathValue("chirpID")
+	if chirpID == "" {
+		http.Error(w, "Invalid chirp ID", http.StatusBadRequest)
+		return
+	}
+	chirpDB, err := cfg.db.Get1Chirp(context.Background(), uuid.MustParse(chirpID))
+	if err != nil {
+		log.Println("error: can not find chirp")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if userID != chirpDB.UserID {
+		w.WriteHeader(http.StatusForbidden)
+		log.Println("error: user can not delete someone others chirp")
+		return
+	}
+	log.Println("deleting chirp:", chirpID, "for user:", userID)
+	if err := cfg.db.DeleteChirp(context.Background(), uuid.MustParse(chirpID)); err != nil {
+		log.Println("error: could not delete chirp")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8") //ustawianie headera odpowiedzi
 	w.WriteHeader(http.StatusOK)                                // ustawianie status code
@@ -473,6 +510,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
 	mux.HandleFunc("PUT /api/users", cfg.handlerChangeUser)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.handlerDeleteChirp)
 
 	server := &http.Server{
 		Addr:    ":" + port, // Bind to port 8080

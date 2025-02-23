@@ -65,4 +65,9 @@ SET email = $1,
 WHERE id = $3
 RETURNING *;
 
+-- name: DeleteChirp :exec
+DELETE FROM chirps
+WHERE id = $1;
+
+
 
