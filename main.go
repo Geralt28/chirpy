@@ -197,7 +197,27 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(chirps)
+
+	type chirpResponse struct {
+		ID        uuid.UUID `json:"id"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+
+	var response []chirpResponse
+	for _, chirp := range chirps {
+		response = append(response, chirpResponse{
+			ID:        chirp.ID,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+		})
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func (cfg *apiConfig) handlerGet1Chirp(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +260,7 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
+	defer r.Body.Close()
 	hashed_pass, err := auth.HashPassword(req.Password)
 	if err != nil {
 		fmt.Println("error: could not hash password")
@@ -281,6 +302,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("error: could not decode json")
 		return
 	}
+	defer r.Body.Close()
 	if req.ExpiresInSec == 0 {
 		req.ExpiresInSec = 60
 	}
@@ -404,6 +426,7 @@ func (cfg *apiConfig) handlerChangeUser(w http.ResponseWriter, r *http.Request) 
 		log.Println("error: could not decode request body (ChangeUser)")
 		return
 	}
+	defer r.Body.Close()
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
